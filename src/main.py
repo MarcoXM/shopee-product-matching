@@ -6,112 +6,140 @@ import os
 import numpy as np
 import pandas as pd
 import gc
+import csv
 import cv2
 import matplotlib.pyplot as plt
 # import cudf, cuml, cupy
 # from cuml.feature_extraction.text import TfidfVectorizer
 # from cuml.neighbors import NearestNeighbors
-from misc import getMetric
-
-from dataset import LandmarkDataset, get_transforms
+from misc import getMetric, combine_for_cv, combine_for_sub
+from sklearn.preprocessing import LabelEncoder
+from dataset import ShopeeDataset, get_transforms
 import albumentations
 import torch
 from torch.utils.data import DataLoader, Dataset
 import torch.nn as nn
 import torch.nn.functional as F
-from model import Enet_Arcface_FINAL
-
+from model import Enet_Arcface_FINAL,ShopeeNet
+from loss import fetch_loss, ShopeeScheduler
+from sklearn.neighbors import NearestNeighbors
+from sklearn.feature_extraction.text import TfidfVectorizer
+from config import model_params,scheduler_params
 import geffnet
+from engine import train_fn, eval_fn
 import transformers
 import math
 from tqdm import tqdm
+from time import time
 
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-os.environ["OMP_NUM_THREADS"] = str(1)
-def main():
+
+DIM = (512,512)
+
+NUM_WORKERS = 4
+TRAIN_BATCH_SIZE = 32
+VALID_BATCH_SIZE = 16
+EPOCHS = 30
+
+model_name = 'efficientnet_b3' #efficientnet_b0-b7
+
+loss_module = 'arcface' #'cosface' #'adacos'
+
+
+log_name = "training_log.txt"
+
+if os.path.isfile(log_name):
+    os.remove(log_name)
+
+with open("training_log.txt", 'w') as csvfile:
+    writer = csv.writer(csvfile)
+    writer.writerow(['fold','epoch', 'loss', 'val_loss'])
+
+
+def main(fold):
     COMPUTE_CV = True
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+    data = pd.read_csv('../train_fold.csv')
+    data['filepath'] = data['image'].apply(lambda x: os.path.join('../', 'train_images', x))
+
+    target_encoder = LabelEncoder()
+
+    data['label_group'] = target_encoder.fit_transform(data['label_group'])
+    
+    train = data[data['fold']!=fold].reset_index(drop=True)
+    valid = data[data['fold']==fold].reset_index(drop=True)
+    # Defining DataSet
+    train_dataset = ShopeeDataset(
+        csv=train,
+        transforms=get_transforms(img_size=DIM[0], trans_type = 'train'),
+        mode = 'train',
+    )
+        
+    valid_dataset = ShopeeDataset(
+        csv=valid,
+        transforms=get_transforms(img_size=DIM[0], trans_type = 'valid'),
+        mode = 'train',
+    )
+        
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=TRAIN_BATCH_SIZE,
+        pin_memory=True,
+        drop_last=True,
+        num_workers=NUM_WORKERS
+    )
+    
+    valid_loader = torch.utils.data.DataLoader(
+        valid_dataset,
+        batch_size=VALID_BATCH_SIZE,
+        num_workers=NUM_WORKERS,
+        shuffle=False,
+        pin_memory=True,
+        drop_last=False,
+    )
+    
+    
+    # Defining Model for specific fold
+    model = ShopeeNet(**model_params)
+    model.to(DEVICE)
+
+    criterion = fetch_loss()
+    criterion.to(DEVICE)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr = scheduler_params['lr_start'])
+    
+    #Defining LR SCheduler
+    scheduler = ShopeeScheduler(optimizer,**scheduler_params)
+        
+    # THE ENGINE LOOP
+    best_loss = 2 << 13
+
+    for epoch in range(EPOCHS):
+        train_loss = train_fn(train_loader, model,criterion, optimizer, DEVICE,epoch_th=epoch,scheduler=scheduler)
+        valid_loss = eval_fn(valid_loader, model, criterion,DEVICE)
 
 
-    test = pd.read_csv('../test.csv')
-    if len(test)>3: 
-        COMPUTE_CV = False
-    else: 
-        print('this submission notebook will compute CV score, but commit notebook will not')
-
-    train = pd.read_csv('../train.csv')
-    tmp = train.groupby('label_group').posting_id.agg('unique').to_dict()
-    train['target'] = train.label_group.map(tmp)
-    print('train shape is', train.shape )
-
-
-    tmp = train.groupby('image_phash').posting_id.agg('unique').to_dict()
-    train['oof'] = train.image_phash.map(tmp)
-
-
-    train['f1'] = train.apply(getMetric('oof'),axis=1)
-    print('CV score for baseline =',train.f1.mean())
-
-
-
-    if COMPUTE_CV:
-        test = pd.read_csv('../train_fold.csv')
-    #     test = test[test.fold==0]
-        # test_gf = cudf.DataFrame(test)
-        print('Using train as test to compute CV (since commit notebook). Shape is', test.shape )
-    else:
-        test = pd.read_csv('../test.csv')
-        # test_gf = cudf.read_csv('../test.csv')
-        print('Test shape is', test.shape )
-
-
-
-    tokenizer = transformers.AutoTokenizer.from_pretrained('../input/bert-base-uncased') 
-
-    if not COMPUTE_CV: 
-        df_sub = pd.read_csv('../test.csv')
-
-        df_test = df_sub.copy()
-        df_test['filepath'] = df_test['image'].apply(lambda x: os.path.join('../', 'test_images', x))
-
-        dataset_test = LandmarkDataset(df_test, 'test', 'test', transforms=get_transforms(img_size=256), tokenizer=tokenizer)
-        test_loader = DataLoader(dataset_test, batch_size=16, num_workers=0)
-
-        print(len(dataset_test),dataset_test[0])
-    else:
-        df_sub = test
-
-        df_test = df_sub.copy()
-        df_test['filepath'] = df_test['image'].apply(lambda x: os.path.join('../', 'train_images', x))
-
-        dataset_test = LandmarkDataset(df_test, 'test', 'test', transforms=get_transforms(img_size=256), tokenizer=tokenizer)
-        test_loader = DataLoader(dataset_test, batch_size=16, num_workers=4)
-
-        print(len(dataset_test),dataset_test[0][0].shape)
+        print('Fold {} | Epoch {}/{} | Training | Loss: {:.4f} | Valid | Loss: {:.4f}'.format(
+                fold, epoch + 1, EPOCHS , train_loss['loss'].avg, valid_loss['loss'].avg ))
+        with open(log_name, 'a') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow([fold, epoch + 1, train_loss['loss'].avg, valid_loss['loss'].avg])
+        
+        if valid_loss['loss'].avg < best_loss:
+            best_loss = valid_loss['loss'].avg
+            torch.save(model.state_dict(),os.path.join("./models",model_name,f'fold_{fold}_model_{model_params["model_name"]}_IMG_SIZE_{DIM[0]}_{model_params["loss_module"]}.bin'))
+            print('best model found for epoch {}'.format(epoch))
 
 
     
 
-
-    model = Enet_Arcface_FINAL('tf_efficientnet_b0_ns', out_dim=11014).to(device=DEVICE)
-    # model = load_model(model, WGT)
-
-    embeds = []
-
-    with torch.no_grad():
-        for img, input_ids, attention_mask in tqdm(test_loader): 
-            img, input_ids, attention_mask = img.to(device=DEVICE), input_ids.to(device=DEVICE), attention_mask.to(device=DEVICE)
-            feat, _ = model(img, input_ids, attention_mask)
-            image_embeddings = feat.detach().cpu().numpy()
-            embeds.append(image_embeddings)
-
-    del model
-    _ = gc.collect()
-    image_embeddings = np.concatenate(embeds)
-    print('image embeddings shape',image_embeddings.shape)
-
 if __name__ == "__main__":
-    main()
+
+    if not os.path.isdir(os.path.join("./models",model_name)):
+        os.makedirs(os.path.join("./models",model_name))
+
+    for i in range(5):
+        main(i)

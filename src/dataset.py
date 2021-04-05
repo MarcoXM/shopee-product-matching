@@ -7,22 +7,39 @@ import torch.nn as nn
 import torch.nn.functional as F
 import os
 import cv2
+from albumentations.pytorch.transforms import ToTensorV2
 
 
 
-def get_transforms(img_size=256):
+def get_transforms(img_size=256, trans_type = 'train'):
+
+    if trans_type == 'train':
+        return  A.Compose([
+            A.Resize(height=img_size, width=img_size, p=1),
+            A.RandomSizedCrop(min_max_height=(int(img_size * 0.8), int(img_size * 0.8)), height=img_size, width=img_size, p=0.5),
+            A.RandomRotate90(p=0.5),
+            A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.1, rotate_limit=15),
+            A.HorizontalFlip(p=0.5),
+            A.VerticalFlip(p=0.5),
+            A.Cutout(num_holes=8, max_h_size=64, max_w_size=64, fill_value=0, p=0.5),
+            A.Normalize(),
+            ToTensorV2(p=1.0),                  
+        ], p=1.0)
+
+
     return  A.Compose([
                 A.Resize(img_size, img_size),
-                A.Normalize()
+                A.Normalize(),
+                ToTensorV2(p=1.0)
             ])
 
 
-class LandmarkDataset(Dataset):
+class ShopeeDataset(Dataset):
     def __init__(self,
                  csv,
-                 split,
-                 mode,
-                transforms = get_transforms(img_size=256),
+                 split = None,
+                 mode = 'tran',
+                transforms = get_transforms(img_size=256, trans_type = 'train'),
                 tokenizer = None):
 
         self.df = csv.reset_index()
@@ -40,17 +57,30 @@ class LandmarkDataset(Dataset):
         text = row.title
         
         image = cv2.imread(row.filepath)
-        image = image[:, :, ::-1]
-        
+ 
+        image = image.astype(np.float32)
+        # print(image.shape)
         res0 = self.transform(image=image)
-        image0 = res0['image'].astype(np.float32)
-        image = image0.transpose(2, 0, 1)        
+        image = res0['image']
 
-        text = self.tokenizer(text, padding='max_length', truncation=True, max_length=16, return_tensors="pt")
-        input_ids = text['input_ids'][0]
-        attention_mask = text['attention_mask'][0]
-
+        input_ids = torch.rand(1, 1)
+        attention_mask = torch.rand(1, 1)
+        if self.tokenizer:
+            text = self.tokenizer(text, padding='max_length', truncation=True, max_length=16, return_tensors="pt")
+            input_ids = text['input_ids'][0]
+            attention_mask = text['attention_mask'][0]
+        
         if self.mode == 'test':
-            return torch.tensor(image), input_ids, attention_mask
+            return {
+                "images": image,
+                "input_ids": input_ids,
+                "attention_mask" : attention_mask,
+            }
         else:
-            return torch.tensor(image), input_ids, attention_mask, torch.tensor(row.label_group)
+            target = torch.tensor(row.label_group)
+            return {
+                "images": image,
+                "input_ids": input_ids,
+                "attention_mask" : attention_mask,
+                "target" : target,
+            }

@@ -1,0 +1,16 @@
+.DS_Store
+.gitignore.swp
+.vscode/
+Pipfile
+geffnet-20200820/
+input/
+sample.csv
+sample_submission.csv
+shopee-product-matching.zip
+src/__pycache__/
+src/training_log.txt
+test.csv
+test_images/
+train.csv
+train_fold.csv
+train_images/
