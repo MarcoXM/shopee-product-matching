@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 # import cudf, cuml, cupy
 # from cuml.feature_extraction.text import TfidfVectorizer
 # from cuml.neighbors import NearestNeighbors
-from misc import getMetric, combine_for_cv, combine_for_sub
+from misc import getMetric, combine_for_cv, combine_for_sub, seed_everything
 from sklearn.preprocessing import LabelEncoder
 from dataset import ShopeeDataset, get_transforms
 import albumentations
@@ -43,12 +43,11 @@ TRAIN_BATCH_SIZE = 32
 VALID_BATCH_SIZE = 16
 EPOCHS = 30
 
-model_name = 'efficientnet_b3' #efficientnet_b0-b7
+model_name = model_params['model_name'] #efficientnet_b0-b7
 
-loss_module = 'arcface' #'cosface' #'adacos'
+seed_everything(224)
 
-
-log_name = "training_log.txt"
+log_name = f"training_log_{model_name}_{model_params['loss_module']}.txt"
 
 if os.path.isfile(log_name):
     os.remove(log_name)

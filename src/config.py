@@ -1,10 +1,11 @@
 
 
-loss_module = 'arcface'
+# loss_module = 'cosface' # ,'arcface'  #'adacos'
+loss_module = 'cosface'
 
 model_params = {
     'n_classes':11014,
-    'model_name':'efficientnet_b3',
+    'model_name':'efficientnet_b7',
     'use_fc':False,
     'fc_dim':512,
     'dropout':0.0,

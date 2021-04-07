@@ -1,5 +1,7 @@
 import numpy as np 
-
+import os 
+import torch
+import random
 
 def combine_for_sub(row):
     x = np.concatenate([row.preds, row.preds2, row.preds3])
@@ -42,3 +44,13 @@ def fetch_scheduler(optimizer):
     elif SCHEDULER =='CosineAnnealingWarmRestarts':
         scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=T_0, T_mult=1, eta_min=min_lr, last_epoch=-1)
     return scheduler
+
+
+def seed_everything(seed=224):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+

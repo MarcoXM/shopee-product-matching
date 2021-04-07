@@ -38,7 +38,7 @@ class ShopeeDataset(Dataset):
     def __init__(self,
                  csv,
                  split = None,
-                 mode = 'tran',
+                 mode = 'train',
                 transforms = get_transforms(img_size=256, trans_type = 'train'),
                 tokenizer = None):
 
