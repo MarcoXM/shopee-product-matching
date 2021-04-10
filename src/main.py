@@ -39,7 +39,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 DIM = (512,512)
 
 NUM_WORKERS = 4
-TRAIN_BATCH_SIZE = 32
+TRAIN_BATCH_SIZE = model_params['batch_size']
 VALID_BATCH_SIZE = 16
 EPOCHS = 30
 

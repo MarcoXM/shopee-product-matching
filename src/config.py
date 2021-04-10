@@ -1,11 +1,11 @@
 
 
 # loss_module = 'cosface' # ,'arcface'  #'adacos'
-loss_module = 'cosface'
-
+loss_module = 'arcface'
+batch_size = 16
 model_params = {
     'n_classes':11014,
-    'model_name':'efficientnet_b7',
+    'model_name':'tf_efficientnet_b4',
     'use_fc':False,
     'fc_dim':512,
     'dropout':0.0,
@@ -15,7 +15,6 @@ model_params = {
     'ls_eps':0.0,
     'theta_zero':0.785,
     'pretrained':True
-}
 
 scheduler_params = {
         "lr_start": 1e-5,
