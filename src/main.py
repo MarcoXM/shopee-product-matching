@@ -20,11 +20,11 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 import torch.nn as nn
 import torch.nn.functional as F
-from model import Enet_Arcface_FINAL,ShopeeNet
+from model import Enet_Arcface_FINAL,ShopeeNet, ShopeeNetV2
 from loss import fetch_loss, ShopeeScheduler
 from sklearn.neighbors import NearestNeighbors
 from sklearn.feature_extraction.text import TfidfVectorizer
-from config import model_params,scheduler_params
+from config import model_params,scheduler_params,batch_size
 import geffnet
 from engine import train_fn, eval_fn
 import transformers
@@ -39,20 +39,20 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 DIM = (512,512)
 
 NUM_WORKERS = 4
-TRAIN_BATCH_SIZE = model_params['batch_size']
-VALID_BATCH_SIZE = 16
-EPOCHS = 30
+TRAIN_BATCH_SIZE = batch_size
+VALID_BATCH_SIZE = 8
+EPOCHS = 20
 
-model_name = model_params['model_name'] #efficientnet_b0-b7
+model_name = model_params['model_name'] #tf_efficientnet_b0-b7
 
 seed_everything(224)
 
-log_name = f"training_log_{model_name}_{model_params['loss_module']}.txt"
+log_name = f"V2_training_log_{model_name}_{model_params['loss_module']}.txt"
 
 if os.path.isfile(log_name):
     os.remove(log_name)
 
-with open("training_log.txt", 'w') as csvfile:
+with open(log_name, 'w') as csvfile:
     writer = csv.writer(csvfile)
     writer.writerow(['fold','epoch', 'loss', 'val_loss'])
 
@@ -102,7 +102,7 @@ def main(fold):
     
     
     # Defining Model for specific fold
-    model = ShopeeNet(**model_params)
+    model = ShopeeNetV2(**model_params)
     model.to(DEVICE)
 
     criterion = fetch_loss()
@@ -129,7 +129,7 @@ def main(fold):
         
         if valid_loss['loss'].avg < best_loss:
             best_loss = valid_loss['loss'].avg
-            torch.save(model.state_dict(),os.path.join("./models",model_name,f'fold_{fold}_model_{model_params["model_name"]}_IMG_SIZE_{DIM[0]}_{model_params["loss_module"]}.bin'))
+            torch.save(model.state_dict(),os.path.join("./models",model_name,f'V2_fold_{fold}_model_{model_params["model_name"]}_IMG_SIZE_{DIM[0]}_{model_params["loss_module"]}.bin'))
             print('best model found for epoch {}'.format(epoch))
 
 
