@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import transformers
 import geffnet
 import math 
-from loss import AdaCos, ArcMarginProduct,AddMarginProduct, fetch_loss
+from loss import AdaCos, ArcMarginProduct,AddMarginProduct, fetch_loss, ArcMarginProduct_subcenter
 from torch.optim.lr_scheduler import _LRScheduler
 from config import *
 import timm
@@ -50,23 +50,36 @@ class Swish_module(nn.Module):
     
  
     
-class Enet_Arcface_FINAL(nn.Module):
-    def __init__(self, enet_type, out_dim):
-        super(Enet_Arcface_FINAL, self).__init__()
-        self.bert = transformers.AutoModel.from_pretrained('../input/bert-base-uncased')
-        self.enet = geffnet.create_model(enet_type.replace('-', '_'), pretrained=None)
-        self.feat = nn.Linear(self.enet.classifier.in_features+self.bert.config.hidden_size, 512)
+class ShopeeNetV3(nn.Module):
+    def __init__(self, n_classes,
+                       model_name='tf_efficientnet_b4',
+                       use_fc=False,
+                       fc_dim=512,
+                       dropout=0.0,
+                       margin=0.50,
+                       loss_module='softmax',
+                       s=30.0,
+                       ls_eps=0.0,
+                       theta_zero=0.785,
+                       pretrained=True):
+        super(ShopeeNetV3, self).__init__()
+     #   self.bert = transformers.AutoModel.from_pretrained('../input/bert-base-uncased')
+        self.enet = timm.create_model(model_name, pretrained=True)
+        self.feat = nn.Linear(self.enet.classifier.in_features, 512) # self.bert.config.hidden_size
         self.swish = Swish_module()
-        self.dropout = nn.Dropout(0.5)
-        self.metric_classify = ArcMarginProduct_subcenter(512, out_dim)
+        self.metric_classify = ArcMarginProduct_subcenter(512, n_classes)
         self.enet.classifier = nn.Identity()
+
+    def extract(self, x):
+        return self.enet(x)
  
-    def forward(self, x,input_ids, attention_mask):
-        x = self.enet(x)
-        text = self.bert(input_ids=input_ids, attention_mask=attention_mask)[1]
-        x = torch.cat([x, text], 1)
-        x = self.swish(self.feat(x))
-        return F.normalize(x), self.metric_classify(x)
+    def forward(self, x, targets ):  #input_ids, attention_mask
+
+        x = self.extract(x)
+    #    text = self.bert(input_ids=input_ids, attention_mask=attention_mask)[1]
+        # x = torch.cat([x, text], 1)
+        logits_m= self.metric_classify(self.swish(self.feat(x)))
+        return logits_m
 
 
 class Attn(nn.Module):
@@ -225,7 +238,7 @@ class ShopeeNetV2(nn.Module):
         self.conv2 = Dblock(self.final_in_features, self.final_in_features, downs=True)
         self.pooling =  nn.AdaptiveAvgPool2d(1)
         self.swish = Swish_module()
-        self.add_fc = spectral_norm(nn.Linear(self.final_in_features,self.final_in_features * 2,bias =False))
+        # self.add_fc = spectral_norm(nn.Linear(self.final_in_features,self.final_in_features * 2,bias =False))
         self.use_fc = use_fc
         if use_fc:
             self.dropout = nn.Dropout(p=dropout)
@@ -236,14 +249,14 @@ class ShopeeNetV2(nn.Module):
 
         self.loss_module = loss_module
         if loss_module == 'arcface':
-            self.final = ArcMarginProduct(self.final_in_features * 2, n_classes,
+            self.final = ArcMarginProduct(self.final_in_features , n_classes,
                                           s=s, m=margin, easy_margin=False, ls_eps=ls_eps)
         elif loss_module == 'cosface':
-            self.final = AddMarginProduct(self.final_in_features * 2, n_classes, s=s, m=margin)
+            self.final = AddMarginProduct(self.final_in_features, n_classes, s=s, m=margin)
         elif loss_module == 'adacos':
-            self.final = AdaCos(self.final_in_features * 2, n_classes, m=margin, theta_zero=theta_zero)
+            self.final = AdaCos(self.final_in_features, n_classes, m=margin, theta_zero=theta_zero)
         else:
-            self.final = nn.Linear(self.final_in_features * 2, n_classes)
+            self.final = nn.Linear(self.final_in_features, n_classes)
 
     def _init_params(self):
         nn.init.xavier_normal_(self.fc.weight)
@@ -278,7 +291,7 @@ class ShopeeNetV2(nn.Module):
         x = self.pooling(x).view(batch_size, -1)
         x = self.swish(x)
         # print("After pooling :  ", x.shape)
-        x = self.add_fc(x)
+        # x = self.add_fc(x)
         if self.use_fc:
             x = self.dropout(x)
             x = self.fc(x)
@@ -337,6 +350,11 @@ def load_model(model, model_file):
     print(f"loaded {model_file}")
     model.eval()    
     return model
+
+
+
+
+
 
 
 
